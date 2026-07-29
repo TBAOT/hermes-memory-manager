@@ -58,17 +58,27 @@ New-Item -ItemType Directory -Force -Path $backendDir | Out-Null
 New-Item -ItemType Directory -Force -Path $desktopDir | Out-Null
 
 # --- Write backend files -----------------------------------------------------
+# IMPORTANT: use UTF8Encoding($false) — no BOM. PowerShell's built-in
+# `Set-Content -Encoding UTF8` (Windows PowerShell 5.x) writes a BOM
+# (EF BB BF), which V8 rejects with "Invalid or unexpected token" when
+# loading plugin.js. Writing bytes via .NET avoids that.
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+function Write-FileNoBom {
+    param([string]$Path, [string]$Content)
+    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
 Write-Host 'Installing backend (plugin_api.py + manifest.json)...' -ForegroundColor Cyan
 $pluginApiContent = Get-PluginFile -RelativePath 'python\dashboard\plugin_api.py' -UrlPath 'python/dashboard/plugin_api.py'
-Set-Content -Path (Join-Path $backendDir 'plugin_api.py') -Value $pluginApiContent -Encoding UTF8
+Write-FileNoBom -Path (Join-Path $backendDir 'plugin_api.py') -Content $pluginApiContent
 
 $manifestContent = Get-PluginFile -RelativePath 'python\dashboard\manifest.json' -UrlPath 'python/dashboard/manifest.json'
-Set-Content -Path (Join-Path $backendDir 'manifest.json') -Value $manifestContent -Encoding UTF8
+Write-FileNoBom -Path (Join-Path $backendDir 'manifest.json') -Content $manifestContent
 
 # --- Write desktop plugin ----------------------------------------------------
 Write-Host 'Installing desktop plugin (plugin.js)...' -ForegroundColor Cyan
 $pluginJsContent = Get-PluginFile -RelativePath 'desktop\plugin.js' -UrlPath 'desktop/plugin.js'
-Set-Content -Path (Join-Path $desktopDir 'plugin.js') -Value $pluginJsContent -Encoding UTF8
+Write-FileNoBom -Path (Join-Path $desktopDir 'plugin.js') -Content $pluginJsContent
 
 # --- Enable the plugin -------------------------------------------------------
 # The dashboard plugin API loader (web_server._mount_plugin_api_routes)

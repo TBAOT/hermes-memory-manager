@@ -42,7 +42,7 @@ fetch_file() {
         local url="$REPO_BASE/$url_path"
         echo "  Downloading $url"
         curl -fsSL "$url"
-    fi
+    fi | sed '1s/^\xEF\xBB\xBF//'   # strip BOM if present
 }
 
 # --- Create directories ------------------------------------------------------
