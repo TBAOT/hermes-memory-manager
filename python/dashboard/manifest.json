@@ -1,0 +1,8 @@
+{
+  "name": "memory-manager",
+  "label": "记忆管理器",
+  "description": "查看和编辑当前 profile 的代理记忆（MEMORY.md）与用户画像（USER.md），随人格切换自动跟随。",
+  "icon": "Database",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}
