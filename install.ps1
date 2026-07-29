@@ -33,20 +33,31 @@ Write-Host "Hermes home: $HermesHome" -ForegroundColor Cyan
 # When running from a local clone, prefer the repo files. When running via
 # curl|iex, download from GitHub.
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$localPython = Join-Path $scriptDir 'python\dashboard'
-$localDesktop = Join-Path $scriptDir 'desktop'
 
-function Get-PluginFile {
-    param([string]$RelativePath, [string]$UrlPath)
+# CRITICAL: read/write at the BYTE level. Windows PowerShell 5.x defaults
+# to the system ANSI codepage (GBK on zh-CN) for Get-Content -Raw, which
+# corrupts UTF-8 Chinese characters into mojibake; Set-Content -Encoding
+# UTF8 adds a BOM. Both cause "Invalid or unexpected token" in V8. Using
+# [IO.File]::ReadAllBytes / WriteAllBytes bypasses all encoding layers.
+function Install-PluginFile {
+    param([string]$RelativePath, [string]$UrlPath, [string]$Dest)
     $localPath = Join-Path $scriptDir $RelativePath
-    if ((-not $scriptDir) -or (-not (Test-Path $localPath))) {
-        # Download from GitHub
+    if ($scriptDir -and (Test-Path $localPath)) {
+        Write-Host "  Copying: $localPath"
+        $bytes = [System.IO.File]::ReadAllBytes($localPath)
+    } else {
         $url = "$REPO_BASE/$UrlPath"
-        Write-Host "  Downloading $url"
-        return (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
+        Write-Host "  Downloading: $url"
+        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing
+        $bytes = $resp.Content
+        # If Content is a string (PowerShell 5 returns string for text/*),
+        # convert back to UTF-8 bytes without BOM.
+        if ($bytes -is [string]) {
+            $enc = New-Object System.Text.UTF8Encoding $false
+            $bytes = $enc.GetBytes($bytes)
+        }
     }
-    Write-Host "  Using local file: $localPath"
-    return Get-Content -Raw -Path $localPath
+    [System.IO.File]::WriteAllBytes($Dest, $bytes)
 }
 
 # --- Create directories ------------------------------------------------------
@@ -58,27 +69,13 @@ New-Item -ItemType Directory -Force -Path $backendDir | Out-Null
 New-Item -ItemType Directory -Force -Path $desktopDir | Out-Null
 
 # --- Write backend files -----------------------------------------------------
-# IMPORTANT: use UTF8Encoding($false) — no BOM. PowerShell's built-in
-# `Set-Content -Encoding UTF8` (Windows PowerShell 5.x) writes a BOM
-# (EF BB BF), which V8 rejects with "Invalid or unexpected token" when
-# loading plugin.js. Writing bytes via .NET avoids that.
-$utf8NoBom = New-Object System.Text.UTF8Encoding $false
-function Write-FileNoBom {
-    param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
-}
-
 Write-Host 'Installing backend (plugin_api.py + manifest.json)...' -ForegroundColor Cyan
-$pluginApiContent = Get-PluginFile -RelativePath 'python\dashboard\plugin_api.py' -UrlPath 'python/dashboard/plugin_api.py'
-Write-FileNoBom -Path (Join-Path $backendDir 'plugin_api.py') -Content $pluginApiContent
-
-$manifestContent = Get-PluginFile -RelativePath 'python\dashboard\manifest.json' -UrlPath 'python/dashboard/manifest.json'
-Write-FileNoBom -Path (Join-Path $backendDir 'manifest.json') -Content $manifestContent
+Install-PluginFile -RelativePath 'python\dashboard\plugin_api.py' -UrlPath 'python/dashboard/plugin_api.py' -Dest (Join-Path $backendDir 'plugin_api.py')
+Install-PluginFile -RelativePath 'python\dashboard\manifest.json' -UrlPath 'python/dashboard/manifest.json' -Dest (Join-Path $backendDir 'manifest.json')
 
 # --- Write desktop plugin ----------------------------------------------------
 Write-Host 'Installing desktop plugin (plugin.js)...' -ForegroundColor Cyan
-$pluginJsContent = Get-PluginFile -RelativePath 'desktop\plugin.js' -UrlPath 'desktop/plugin.js'
-Write-FileNoBom -Path (Join-Path $desktopDir 'plugin.js') -Content $pluginJsContent
+Install-PluginFile -RelativePath 'desktop\plugin.js' -UrlPath 'desktop/plugin.js' -Dest (Join-Path $desktopDir 'plugin.js')
 
 # --- Enable the plugin -------------------------------------------------------
 # The dashboard plugin API loader (web_server._mount_plugin_api_routes)
