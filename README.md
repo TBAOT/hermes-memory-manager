@@ -57,6 +57,20 @@ The installer will:
 3. Enable the plugin in `config.yaml` (`hermes plugins enable memory-manager`)
 4. Prompt you to restart Hermes Desktop
 
+### Native install (Hermes 0.11+)
+
+On any platform with `hermes` CLI available:
+
+```bash
+bash hermes-install.sh install
+```
+
+This uses the project-local `plugin.yaml` manifest so Hermes can discover, install, and enable the plugin natively. Uninstall with:
+
+```bash
+bash hermes-install.sh uninstall
+```
+
 ### Manual installation
 
 ```bash
