@@ -1,0 +1,7 @@
+name: memory-manager
+version: "0.1.0"
+description: View and edit Hermes Agent memory (MEMORY.md / USER.md) directly from the desktop UI with automatic profile switching.
+author: TBAOT
+homepage: https://github.com/TBAOT/hermes-memory-manager
+license: MIT
+requires_env: []
