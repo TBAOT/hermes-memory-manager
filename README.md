@@ -80,7 +80,7 @@ hermes gateway restart
 1. **Launch** Hermes Desktop
 2. Click **Memory Manager** (database icon) in the left sidebar, or press `Ctrl+K` and search "Open Memory Manager"
 3. Switch between **Agent Memory** / **User Profile** tabs
-4. Edit freely — click **Save** to persist (a `.bak` copy is kept alongside)
+Edit freely — click **Save** to persist (a `.bak` copy is kept alongside)
 5. Switch profiles from the top bar — content reloads automatically
 
 ---
