@@ -1,24 +1,26 @@
-# Hermes Memory Manager
+# Hermes Memory Manager ☤
 
-[![Hermes Agent](https://img.shields.io/badge/Hermes_Agent-Desktop_Plugin-8A2BE2)](https://github.com/NousResearch/hermes-agent)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/nousresearch/hermes-agent)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20|%20Linux%20|%20macOS-lightgrey)]()
+[![Hermes Agent](https://img.shields.io/badge/Hermes_Agent-Desktop_Plugin-8A2BE2)](https://github.com/nousresearch/hermes-agent)
 
-A desktop plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that lets you view and edit your agent's **MEMORY.md** and **USER.md** directly from the desktop UI — with automatic profile switching.
+A desktop plugin for [Hermes Agent](https://github.com/nousresearch/hermes-agent) that lets you view and edit your agent's **MEMORY.md** and **USER.md** directly from the desktop UI — with automatic profile switching.
 
-> **No more `cat ~/.hermes/memories/MEMORY.md` in the terminal.** Open the sidebar, edit, and save — that's it.
+> No more `cat ~/.hermes/memories/MEMORY.md` in the terminal. Open the sidebar, edit, and save — that's it.
 
 ---
 
 ## Features
 
-- **Sidebar entry** — one click to open the memory editor
-- **Tabbed editing** — switch between **Agent Memory** and **User Profile**
-- **Profile-aware** — switch profiles in the desktop, memory content follows automatically
-- **Safe saves** — creates `.bak` backup before every write
-- **Unsaved change detection** — warns before switching tabs with dirty state
-- **Command palette** — press `Ctrl+K` and search "Open Memory Manager"
-- **Character counter + progress bar** — shows usage against your configured char limit
+| Feature | Description |
+|---------|-------------|
+| **Sidebar entry** | One click to open the memory editor |
+| **Tabbed editing** | Switch between **Agent Memory** and **User Profile** |
+| **Profile-aware** | Switch profiles in the desktop, memory content follows automatically |
+| **Safe saves** | Creates `.bak` backup before every write |
+| **Unsaved change detection** | Warns before switching tabs with dirty state |
+| **Command palette** | Press `Ctrl+K` and search "Open Memory Manager" |
+| **Character counter + progress bar** | Shows usage against your configured char limit |
 
 ---
 
@@ -87,7 +89,7 @@ hermes gateway restart
 
 ## Project Structure
 
-```
+```text
 hermes-memory-manager/
 ├── python/
 │   └── dashboard/
