@@ -3,7 +3,6 @@
 #
 # Usage:
 #   bash hermes-install.sh          # install
-#   bash hermes-install.sh --uninstall   # uninstall
 #
 # Respects HERMES_HOME.  Operates entirely outside the Hermes source tree
 # so it can be used when the plugin is installed from the git repo.
@@ -31,39 +30,103 @@ fi
 # --- Resolve Python / config tool -------------------------------------------
 HERMES_PY="$HERMES_HOME/hermes-agent/venv/bin/python"
 if [[ ! -x "$HERMES_PY" ]]; then
-    HERMES_PY="python3"
+    # Try plain "python" first (Windows native Python), then "python3"
+    if command -v python &>/dev/null && python --version &>/dev/null; then
+        HERMES_PY="python"
+    elif command -v python3 &>/dev/null; then
+        HERMES_PY="python3"
+    else
+        echo "Python not found. Install Hermes or Python first." >&2
+        exit 1
+    fi
+fi
+
+# --- Resolve config.py path -------------------------------------------------
+# Hermes CLI config helpers may not be importable in all Hermes installs.
+# We try to locate hermes_cli.config directly.
+HERMES_CLI_DIR=""
+if [[ -d "$HERMES_HOME/hermes-agent/hermes_cli" ]]; then
+    HERMES_CLI_DIR="$HERMES_HOME/hermes-agent"
+elif [[ -d "$HERMES_HOME/src/hermes_cli" ]]; then
+    HERMES_CLI_DIR="$HERMES_HOME/src"
 fi
 
 # --- Helpers -----------------------------------------------------------------
 enable_plugin() {
-    # Add plugin to plugins.enabled in config.yaml via Hermes' own config
-    # helper so the format stays consistent with `hermes plugins enable`.
-    "$HERMES_PY" - "$HERMES_HOME" "$PLUGIN_ID" <<'PY'
+    # Add plugin to plugins.enabled in config.yaml.
+    # Strategy: write a tiny Python helper to a temp file and run it.
+    # This avoids bash heredoc issues on Windows (MSYS passes stdin oddly).
+    local python_script
+    python_script=$(mktemp --suffix=.py)
+    cat > "$python_script" <<'PYEOF'
 import sys
+import os
 from pathlib import Path
+
 hermes_home = Path(sys.argv[1])
 plugin_id = sys.argv[2]
+hermes_cli_dir = sys.argv[3] if len(sys.argv) > 3 else ""
+
+# Ensure hermes_cli is importable
+if hermes_cli_dir and hermes_cli_dir not in sys.path:
+    sys.path.insert(0, hermes_cli_dir)
 
 try:
-    sys.path.insert(0, str(hermes_home / 'hermes-agent'))
     from hermes_cli.config import load_config, save_config
     cfg = load_config()
-    plugins = cfg.setdefault('plugins', {})
-    enabled = plugins.get('enabled')
+    plugins = cfg.setdefault("plugins", {})
+    enabled = plugins.get("enabled")
     if not isinstance(enabled, list):
         enabled = []
     if plugin_id not in enabled:
         enabled.append(plugin_id)
-        plugins['enabled'] = sorted(enabled)
+        plugins["enabled"] = sorted(enabled)
         save_config(cfg)
-        print(f'  Added {plugin_id} to plugins.enabled')
+        print(f"  Added {plugin_id} to plugins.enabled")
     else:
-        print(f'  {plugin_id} already in plugins.enabled')
+        print(f"  {plugin_id} already in plugins.enabled")
 except Exception as exc:
-    # Fallback: touch config.yaml via Hermes CLI itself
+    # Last resort: use Hermes CLI itself
+    print(f"  hermes_cli.config not available ({exc}); falling back to hermes CLI")
     import subprocess
-    subprocess.run(['hermes', 'plugins', 'enable', plugin_id], check=False)
-PY
+    subprocess.run(["hermes", "plugins", "enable", plugin_id], check=False)
+PYEOF
+    "$HERMES_PY" "$python_script" "$HERMES_HOME" "$HERMES_CLI_DIR"
+    rm -f "$python_script"
+}
+
+disable_plugin() {
+    local python_script
+    python_script=$(mktemp --suffix=.py)
+    cat > "$python_script" <<'PYEOF'
+import sys
+from pathlib import Path
+
+hermes_home = Path(sys.argv[1])
+plugin_id = sys.argv[2]
+hermes_cli_dir = sys.argv[3] if len(sys.argv) > 3 else ""
+
+if hermes_cli_dir and hermes_cli_dir not in sys.path:
+    sys.path.insert(0, hermes_cli_dir)
+
+try:
+    from hermes_cli.config import load_config, save_config
+    cfg = load_config()
+    plugins = cfg.setdefault("plugins", {})
+    enabled = plugins.get("enabled") or []
+    if plugin_id in enabled:
+        enabled.remove(plugin_id)
+        plugins["enabled"] = sorted(enabled)
+        save_config(cfg)
+        print(f"  Removed {plugin_id} from plugins.enabled")
+    else:
+        print(f"  {plugin_id} not in plugins.enabled")
+except Exception:
+    import subprocess
+    subprocess.run(["hermes", "plugins", "disable", plugin_id], check=False)
+PYEOF
+    "$HERMES_PY" "$python_script" "$HERMES_HOME" "$HERMES_CLI_DIR"
+    rm -f "$python_script"
 }
 
 install_files() {
@@ -94,19 +157,20 @@ install_files() {
     # Write plugin.yaml for Hermes native discovery
     cp "$SOURCE_DIR/plugin.yaml" "$HERMES_HOME/plugins/$PLUGIN_ID/plugin.yaml"
 
-    # Write uninstall script
-    cat > "$HERMES_HOME/plugins/$PLUGIN_ID/uninstall.sh" <<UEOF
+    # Write uninstall.sh helper in the plugin directory
+    cat > "$backend_dir/uninstall.sh" <<'UNINST'
 #!/usr/bin/env bash
-set -euo pipefail
-PLUGIN_ID="$PLUGIN_ID"
-HERMES_HOME="$HERMES_HOME"
-echo "Uninstalling \$PLUGIN_ID..."
-rm -rf "\$HERMES_HOME/plugins/\$PLUGIN_ID"
-rm -rf "\$HERMES_HOME/desktop-plugins/\$PLUGIN_ID"
-hermes plugins disable "\$PLUGIN_ID" 2>/dev/null || true
+PLUGIN_ID="memory-manager"
+HERMES_HOME="$(cd "$(dirname "$0")/../../../.." && pwd)"
+# Navigate up from plugins/<id>/dashboard/ to HERMES_HOME
+HERMES_HOME="$(cd "$HERMES_HOME/../../.." && pwd)"
+echo "Uninstalling $PLUGIN_ID..."
+rm -rf "$HERMES_HOME/plugins/$PLUGIN_ID"
+rm -rf "$HERMES_HOME/desktop-plugins/$PLUGIN_ID"
+hermes plugins disable "$PLUGIN_ID" 2>/dev/null || true
 echo "Done."
-UEOF
-    chmod +x "$HERMES_HOME/plugins/$PLUGIN_ID/uninstall.sh"
+UNINST
+    chmod +x "$backend_dir/uninstall.sh"
 }
 
 # --- Main ---------------------------------------------------------------------
@@ -119,31 +183,14 @@ case "${1:-install}" in
         echo "$PLUGIN_ID installed successfully."
         echo "Next: restart Hermes Desktop or run 'hermes gateway restart'."
         echo "Then open the sidebar — you'll see a 'Memory Manager' entry."
+        echo ""
+        echo "To uninstall, run: hermes-install.sh uninstall"
         ;;
     uninstall|remove)
         echo "Uninstalling $PLUGIN_ID from $HERMES_HOME"
         rm -rf "$HERMES_HOME/plugins/$PLUGIN_ID"
         rm -rf "$HERMES_HOME/desktop-plugins/$PLUGIN_ID"
-        "$HERMES_PY" - "$HERMES_HOME" "$PLUGIN_ID" uninstall <<'PY'
-import sys
-from pathlib import Path
-hermes_home = Path(sys.argv[1])
-plugin_id = sys.argv[2]
-try:
-    sys.path.insert(0, str(hermes_home / 'hermes-agent'))
-    from hermes_cli.config import load_config, save_config
-    cfg = load_config()
-    plugins = cfg.setdefault('plugins', {})
-    enabled = plugins.get('enabled') or []
-    if plugin_id in enabled:
-        enabled.remove(plugin_id)
-        plugins['enabled'] = sorted(enabled)
-        save_config(cfg)
-        print(f'  Removed {plugin_id} from plugins.enabled')
-except Exception:
-    import subprocess
-    subprocess.run(['hermes', 'plugins', 'disable', plugin_id], check=False)
-PY
+        disable_plugin
         echo "Done. Restart Hermes Desktop to apply."
         ;;
     *)
