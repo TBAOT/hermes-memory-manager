@@ -17,7 +17,7 @@ A desktop plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent
 - **Profile-aware** — switch profiles in the desktop, memory content follows automatically
 - **Safe saves** — creates `.bak` backup before every write
 - **Unsaved change detection** — warns before switching tabs with dirty state
-- **Command palette** — press `Ctrl+K` and search "打开记忆管理器"
+- **Command palette** — press `Ctrl+K` and search "Open Memory Manager"
 - **Character counter + progress bar** — shows usage against your configured char limit
 
 ---
@@ -28,7 +28,7 @@ A desktop plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent
 |---------------|---------------|
 | ![Sidebar Entry](screenshots/sidebar-entry.png) | ![Memory Editor](screenshots/memory-editor.png) |
 
-> Click **记忆管理器** in the left sidebar to open the memory editor, where you can view and edit **Agent Memory** / **User Profile** with automatic multi-profile switching.
+> Click **Memory Manager** in the left sidebar to open the memory editor, where you can view and edit **Agent Memory** / **User Profile** with automatic multi-profile switching.
 
 ---
 
@@ -78,7 +78,7 @@ hermes gateway restart
 ## Usage
 
 1. **Launch** Hermes Desktop
-2. Click **记忆管理器** (database icon) in the left sidebar, or press `Ctrl+K` and search "打开记忆管理器"
+2. Click **Memory Manager** (database icon) in the left sidebar, or press `Ctrl+K` and search "Open Memory Manager"
 3. Switch between **Agent Memory** / **User Profile** tabs
 4. Edit freely — click **Save** to persist (a `.bak` copy is kept alongside)
 5. Switch profiles from the top bar — content reloads automatically
