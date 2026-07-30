@@ -157,43 +157,40 @@ switch ($Action.ToLower()) {
         Write-Host "Installing desktop plugin (plugin.js)..." -ForegroundColor Cyan
         Install-PluginFile -RelativePath "desktop\plugin.js" -UrlPath "desktop/plugin.js" -Dest (Join-Path $desktopDir "plugin.js")
 
-        # Write uninstall script for Windows
-        $uninstallPs1 = @"
-`$ErrorActionPreference = 'Stop'
-`$PLUGIN_ID = '$PLUGIN_ID'
-`$HERMES_HOME = '$HermesHome'
-Write-Host "Uninstalling `$PLUGIN_ID..." -ForegroundColor Yellow
-`$backendDir = Join-Path `$HERMES_HOME "plugins\`$PLUGIN_ID"
-`$desktopDir = Join-Path `$HERMES_HOME "desktop-plugins\`$PLUGIN_ID"
-if (Test-Path `$backendDir) { Remove-Item -Recurse -Force `$backendDir }
-if (Test-Path `$desktopDir) { Remove-Item -Recurse -Force `$desktopDir }
-
-`$disableScript = @"
-import sys
-from pathlib import Path
-hermes_home = Path(r`"`$HERMES_HOME`")
-plugin_id = `"`$PLUGIN_ID`"
-try:
-    sys.path.insert(0, str(hermes_home / "hermes-agent"))
-    from hermes_cli.config import load_config, save_config
-    cfg = load_config()
-    plugins = cfg.setdefault("plugins", {})
-    enabled = plugins.get("enabled") or []
-    if plugin_id in enabled:
-        enabled.remove(plugin_id)
-        plugins["enabled"] = sorted(enabled)
-        save_config(cfg)
-        print(f"  Removed {plugin_id} from plugins.enabled")
-except Exception:
-    import subprocess
-    subprocess.run(["hermes", "plugins", "disable", plugin_id], check=False)
-"@
-`$disableScript | python -
-
-Write-Host "`$PLUGIN_ID uninstalled." -ForegroundColor Green
-Write-Host "Restart Hermes Desktop to apply."
-"@
-        $uninstallPs1 | Out-File -FilePath (Join-Path $backendDir "uninstall.ps1") -Encoding UTF8 -NoNewline
+        # Write uninstall script for Windows (using byte-level write to avoid here-string nesting issues)
+        $u = '$ErrorActionPreference = "Stop"'
+        $u += "`n" + '$PLUGIN_ID = "' + $PLUGIN_ID + '"'
+        $u += "`n" + '$HERMES_HOME = "' + $HermesHome + '"'
+        $u += "`n" + 'Write-Host "Uninstalling $PLUGIN_ID..." -ForegroundColor Yellow'
+        $u += "`n" + '$backendDir = Join-Path $HERMES_HOME "plugins\$PLUGIN_ID"'
+        $u += "`n" + '$desktopDir = Join-Path $HERMES_HOME "desktop-plugins\$PLUGIN_ID"'
+        $u += "`n" + 'if (Test-Path $backendDir) { Remove-Item -Recurse -Force $backendDir }'
+        $u += "`n" + 'if (Test-Path $desktopDir) { Remove-Item -Recurse -Force $desktopDir }'
+        $u += "`n" + '$disableScript = @'''
+        $u += "`n" + 'import sys'
+        $u += "`n" + 'from pathlib import Path'
+        $u += "`n" + 'hermes_home = Path(r"$HERMES_HOME")'
+        $u += "`n" + 'plugin_id = "$PLUGIN_ID"'
+        $u += "`n" + 'try:'
+        $u += "`n" + '    sys.path.insert(0, str(hermes_home / "hermes-agent"))'
+        $u += "`n" + '    from hermes_cli.config import load_config, save_config'
+        $u += "`n" + '    cfg = load_config()'
+        $u += "`n" + '    plugins = cfg.setdefault("plugins", {})'
+        $u += "`n" + '    enabled = plugins.get("enabled") or []'
+        $u += "`n" + '    if plugin_id in enabled:'
+        $u += "`n" + '        enabled.remove(plugin_id)'
+        $u += "`n" + '        plugins["enabled"] = sorted(enabled)'
+        $u += "`n" + '        save_config(cfg)'
+        $u += "`n" + '        print(f"  Removed {plugin_id} from plugins.enabled")'
+        $u += "`n" + 'except Exception:'
+        $u += "`n" + '    import subprocess'
+        $u += "`n" + '    subprocess.run(["hermes", "plugins", "disable", plugin_id], check=False)'
+        $u += "`n" + "'@"
+        $u += "`n" + '$disableScript | python -'
+        $u += "`n" + 'Write-Host "$PLUGIN_ID uninstalled." -ForegroundColor Green'
+        $u += "`n" + 'Write-Host "Restart Hermes Desktop to apply."'
+        $enc = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText((Join-Path $backendDir "uninstall.ps1"), $u, $enc)
 
         Enable-Plugin -HermesHome $HermesHome -PluginId $PLUGIN_ID
 
