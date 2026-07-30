@@ -13,6 +13,7 @@ node_modules/
 # Editor / OS
 .vscode/
 .idea/
+.workbuddy/
 .DS_Store
 Thumbs.db
 

@@ -12,6 +12,7 @@ a context-local HERMES_HOME override.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Dict
@@ -33,6 +34,9 @@ MEMORY_FILES: Dict[str, str] = {
     "user": "USER.md",
 }
 
+# Default size limit: 1 MiB total for both files.
+DEFAULT_MAX_SIZE_BYTES = 1_048_576
+
 
 class MemoryContent(BaseModel):
     """Request body for saving memory content."""
@@ -41,9 +45,45 @@ class MemoryContent(BaseModel):
     user: str | None = None
 
 
+class MemorySettings(BaseModel):
+    """Request / response body for plugin settings."""
+
+    max_size_bytes: int = DEFAULT_MAX_SIZE_BYTES
+
+
 def _memory_dir() -> Path:
     """Return the active profile's memories directory."""
     return get_hermes_home() / "memories"
+
+
+def _settings_path() -> Path:
+    """Return the path to the plugin's settings JSON file."""
+    return _memory_dir() / ".memory-manager-settings.json"
+
+
+def _load_settings() -> MemorySettings:
+    """Load persisted settings or return defaults."""
+    path = _settings_path()
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return MemorySettings(**raw)
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+    return MemorySettings()
+
+
+def _save_settings(settings: MemorySettings) -> None:
+    """Persist settings to disk."""
+    path = _settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.write_text(settings.model_dump_json(indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save settings: {exc}",
+        ) from exc
 
 
 def _read_file(path: Path) -> str:
@@ -79,6 +119,23 @@ def _write_file(path: Path, content: str) -> None:
         ) from exc
 
 
+def _file_size(path: Path) -> int:
+    """Return the size of a file in bytes, or 0 if missing."""
+    try:
+        return path.stat().st_size if path.exists() else 0
+    except OSError:
+        return 0
+
+
+def _format_size(bytes_val: int) -> str:
+    """Human-readable size string."""
+    if bytes_val >= 1_048_576:
+        return f"{bytes_val / 1_048_576:.2f} MB"
+    if bytes_val >= 1024:
+        return f"{bytes_val / 1024:.1f} KB"
+    return f"{bytes_val} B"
+
+
 @router.get("/content")
 async def get_memory_content() -> Dict[str, str]:
     """Return the current profile's MEMORY.md and USER.md contents."""
@@ -95,13 +152,22 @@ async def save_memory_content(body: MemoryContent) -> Dict[str, object]:
     next to the original.
     """
     mem_dir = _memory_dir()
+    settings = _load_settings()
     written: list[str] = []
+    total_after = 0
     for key, fname in MEMORY_FILES.items():
         value = getattr(body, key)
         if value is None:
+            total_after += _file_size(mem_dir / fname)
             continue
         _write_file(mem_dir / fname, value)
         written.append(fname)
+        total_after += len(value.encode("utf-8"))
+
+    if total_after > settings.max_size_bytes:
+        # Warn but don't block — the UI will show over-limit state.
+        pass
+
     return {"status": "success", "written": written}
 
 
@@ -128,3 +194,41 @@ async def get_profile_info() -> Dict[str, object]:
         "hermes_home": str(home),
         "memory_dir": str(mem_dir),
     }
+
+
+@router.get("/stats")
+async def get_memory_stats() -> Dict[str, object]:
+    """Return file sizes and usage statistics."""
+    mem_dir = _memory_dir()
+    settings = _load_settings()
+    sizes = {}
+    total = 0
+    for key, fname in MEMORY_FILES.items():
+        size = _file_size(mem_dir / fname)
+        sizes[key] = {
+            "bytes": size,
+            "formatted": _format_size(size),
+        }
+        total += size
+
+    return {
+        "sizes": sizes,
+        "total_bytes": total,
+        "total_formatted": _format_size(total),
+        "max_size_bytes": settings.max_size_bytes,
+        "max_size_formatted": _format_size(settings.max_size_bytes),
+        "usage_percent": round(total / settings.max_size_bytes * 100, 1) if settings.max_size_bytes else 0,
+    }
+
+
+@router.get("/settings")
+async def get_memory_settings() -> MemorySettings:
+    """Return the current plugin settings."""
+    return _load_settings()
+
+
+@router.post("/settings")
+async def save_memory_settings(body: MemorySettings) -> MemorySettings:
+    """Save plugin settings."""
+    _save_settings(body)
+    return body
