@@ -120,13 +120,31 @@ except Exception as exc:
         print(f'  {plugin_id} already in plugins.enabled')
 PY
 
+# --- Link plugins to all profiles (Linux/macOS) --------------------------------
+PROFILES_DIR="$HERMES_HOME/profiles"
+if [[ -d "$PROFILES_DIR" ]]; then
+    echo ""
+    echo "Linking plugins to all profiles..."
+    for p in "$PROFILES_DIR"/*/; do
+        pname=$(basename "$p")
+        tgt="$p/plugins"
+        if [[ ! -d "$tgt" && ! -L "$tgt" ]]; then
+            ln -sfn "$HERMES_HOME/plugins" "$tgt" 2>/dev/null && \
+                echo "  [$pname] LINKED" || \
+                echo "  [$pname] FAILED"
+        else
+            echo "  [$pname] already exists, skipped"
+        fi
+    done
+fi
+
 echo ""
 echo "Memory Manager plugin installed successfully."
 echo ""
 echo "Next steps:"
 echo "  1. Restart Hermes Desktop (or run: hermes gateway restart)"
-echo "  2. Open the sidebar — you'll see a \"记忆管理器\" entry."
-echo "  3. Or use the command palette (Ctrl+K) and search \"打开记忆管理器\"."
+echo "  2. Open the sidebar — you'll see a \"Memory Manager\" entry."
+echo "  3. Or use the command palette (Ctrl+K) and search \"Open Memory Manager\"."
 echo ""
 echo "To uninstall: delete these folders and run hermes plugins disable memory-manager"
 echo "  - $BACKEND_DIR"

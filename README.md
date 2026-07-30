@@ -112,7 +112,7 @@ hermes-memory-manager/
 ├── desktop/
 │   └── plugin.js                  # Desktop runtime plugin (route, sidebar, palette)
 ├── scripts/
-│   └── link-plugins-api-to-profiles.ps1   # Multi-profile support
+│   └── link-plugins-api-to-profiles.ps1   # Multi-profile helper
 ├── install.ps1                    # Windows installer
 ├── install.sh                     # Unix installer
 └── README.md
@@ -122,25 +122,11 @@ hermes-memory-manager/
 
 ## Multi-Profile Support
 
-Hermes uses **profiles** (separate config/memory directories for different contexts). When you use the plugin with `hermes serve --profile <name>`, the dashboard server looks for plugins in that profile's directory.
+Hermes uses **profiles** (separate config/memory directories for different contexts). The one-line installer automatically creates plugin links for **all** existing profiles — no extra steps needed.
 
-To make the plugin available across **all** your profiles, run the helper script **once** after installation:
-
-**Windows:**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\link-plugins-api-to-profiles.ps1
-```
-
-**Linux / macOS** (requires `ln -s` per profile):
-
-```bash
-for p in ~/.hermes/profiles/*/; do
-  ln -sfn ~/.hermes/plugins "$p/plugins"
-done
-```
-
-> **New profile?** Just re-run the script. It creates junction/symlink from each profile's `plugins/` directory to the default one.
+> **New profile created later?** Just re-run the one-line installer, or link manually:
+> - **Windows:** `powershell -ExecutionPolicy Bypass -File scripts\link-plugins-api-to-profiles.ps1`
+> - **Linux / macOS:** `ln -sfn ~/.hermes/plugins ~/.hermes/profiles/<name>/plugins`
 
 ---
 

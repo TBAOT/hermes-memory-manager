@@ -197,6 +197,28 @@ Write-Host "Restart Hermes Desktop to apply."
 
         Enable-Plugin -HermesHome $HermesHome -PluginId $PLUGIN_ID
 
+        # --- Link plugins directory to all profiles ----------------------------------
+        $sourcePlugins = Join-Path $HermesHome "plugins"
+        $profilesDir   = Join-Path $HermesHome "profiles"
+        if (Test-Path $profilesDir) {
+            Write-Host ""
+            Write-Host "Linking plugins to all profiles..." -ForegroundColor Cyan
+            Get-ChildItem $profilesDir -Directory | ForEach-Object {
+                $pName = $_.Name
+                $tgt   = Join-Path $_.FullName "plugins"
+                if (-not (Test-Path $tgt)) {
+                    try {
+                        New-Item -Path $tgt -ItemType Junction -Target $sourcePlugins -Force | Out-Null
+                        Write-Host "  [$pName] LINKED" -ForegroundColor Green
+                    } catch {
+                        Write-Host "  [$pName] FAILED: $_" -ForegroundColor Red
+                    }
+                } else {
+                    Write-Host "  [$pName] already exists, skipped" -ForegroundColor Yellow
+                }
+            }
+        }
+
         Write-Host ""
         Write-Host "$PLUGIN_ID installed successfully." -ForegroundColor Green
         Write-Host ""
