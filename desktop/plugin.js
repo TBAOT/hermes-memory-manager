@@ -54,11 +54,6 @@ async function fetchStats() {
   return _rest('/stats')
 }
 
-async function fetchSettings() {
-  if (!_rest) throw new Error('插件未初始化')
-  return _rest('/settings')
-}
-
 function useMemoryContent(profile) {
   const queryKey = ['memory-manager', 'content', profile]
   const { data, isLoading, error, refetch } = useQuery({
@@ -78,15 +73,6 @@ function useMemoryStats(profile) {
   return { data, isLoading, error, queryKey }
 }
 
-function useMemorySettings(profile) {
-  const queryKey = ['memory-manager', 'settings', profile]
-  const { data, isLoading } = useQuery({
-    queryKey,
-    queryFn: fetchSettings
-  })
-  return { data, isLoading, queryKey }
-}
-
 function MemoryManagerPanel() {
   const profile = useValue(host.state.profile)
   const queryClient = useQueryClient()
@@ -96,8 +82,6 @@ function MemoryManagerPanel() {
   const [dirty, setDirty] = useState({ memory: false, user: false })
   const [confirmSwitch, setConfirmSwitch] = useState(null)
   const [confirmReset, setConfirmReset] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [settingsDraft, setSettingsDraft] = useState('1')
 
   const profileName = profile || 'default'
 
@@ -107,9 +91,8 @@ function MemoryManagerPanel() {
   // below.
   const { data, isLoading, error, refetch } = useMemoryContent(profileName)
   const { data: stats } = useMemoryStats(profileName)
-  const { data: settings } = useMemorySettings(profileName)
 
-  // Initialize draft when content loads or profile changes.
+  // Sync stats on data change
   useEffect(() => {
     if (data) {
       setDraft({
@@ -119,13 +102,6 @@ function MemoryManagerPanel() {
       setDirty({ memory: false, user: false })
     }
   }, [data])
-
-  // Sync settings draft when settings load.
-  useEffect(() => {
-    if (settings && settings.max_size_bytes) {
-      setSettingsDraft((settings.max_size_bytes / 1_048_576).toFixed(1))
-    }
-  }, [settings])
 
   const saveMutation = useMutation({
     mutationFn: async (content) => {
@@ -143,22 +119,6 @@ function MemoryManagerPanel() {
     }
   })
 
-  const saveSettingsMutation = useMutation({
-    mutationFn: async (maxSizeMb) => {
-      if (!_rest) throw new Error('插件未初始化')
-      const maxSizeBytes = Math.round(parseFloat(maxSizeMb) * 1_048_576)
-      return _rest('/settings', { method: 'POST', body: { max_size_bytes: maxSizeBytes } })
-    },
-    onSuccess: () => {
-      host.notify({ kind: 'success', message: '设置已保存' })
-      queryClient.invalidateQueries({ queryKey: ['memory-manager', 'settings'] })
-      queryClient.invalidateQueries({ queryKey: ['memory-manager', 'stats'] })
-    },
-    onError: (err) => {
-      host.notifyError(err, '保存设置失败')
-    }
-  })
-
   const handleChange = useCallback((key, value) => {
     setDraft(prev => ({ ...prev, [key]: value }))
     setDirty(prev => ({ ...prev, [key]: true }))
@@ -171,15 +131,6 @@ function MemoryManagerPanel() {
     if (Object.keys(payload).length === 0) return
     saveMutation.mutate(payload)
   }, [draft, dirty, saveMutation])
-
-  const handleSaveSettings = useCallback(() => {
-    const val = parseFloat(settingsDraft)
-    if (Number.isNaN(val) || val <= 0) {
-      host.notify({ kind: 'error', message: '请输入有效的大小限制' })
-      return
-    }
-    saveSettingsMutation.mutate(settingsDraft)
-  }, [settingsDraft, saveSettingsMutation])
 
   const handleTabSwitch = useCallback((next) => {
     if (next === activeTab) return
@@ -261,12 +212,6 @@ function MemoryManagerPanel() {
                   jsx(Button, {
                     variant: 'ghost',
                     size: 'sm',
-                    onClick: () => setShowSettings(s => !s),
-                    children: '设置'
-                  }),
-                  jsx(Button, {
-                    variant: 'ghost',
-                    size: 'sm',
                     onClick: () => setConfirmReset(true),
                     disabled: !hasDirty || isSaving,
                     children: '撤销更改'
@@ -278,41 +223,6 @@ function MemoryManagerPanel() {
                     children: isSaving ? '保存中…' : '保存'
                   })
                 ]
-              })
-            ]
-          }),
-
-          // Settings panel (inline)
-          showSettings && jsxs('div', {
-            className: 'flex items-center gap-3 rounded-md border bg-muted/50 p-3',
-            children: [
-              jsxs('span', {
-                className: 'text-xs font-medium',
-                children: ['记忆大小限制']
-              }),
-              jsxs('div', {
-                className: 'flex items-center gap-1',
-                children: [
-                  jsx('input', {
-                    type: 'number',
-                    min: 0.1,
-                    step: 0.5,
-                    className: 'h-7 w-20 rounded-md border bg-background px-2 text-xs tabular-nums',
-                    value: settingsDraft,
-                    onChange: (e) => setSettingsDraft(e.target.value)
-                  }),
-                  jsx('span', {
-                    className: 'text-xs text-muted-foreground',
-                    children: 'MB'
-                  })
-                ]
-              }),
-              jsx(Button, {
-                size: 'sm',
-                variant: 'outline',
-                onClick: handleSaveSettings,
-                disabled: saveSettingsMutation.isPending,
-                children: saveSettingsMutation.isPending ? '保存中…' : '保存'
               })
             ]
           }),
