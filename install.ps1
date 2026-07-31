@@ -63,6 +63,48 @@ function Install-PluginFile {
 }
 
 # --- helpers to enable/disable the plugin in config.yaml -------------------
+function Ensure-ProfilePluginsLinks {
+    # Walks <HERMES_HOME>/profiles/* and makes sure each profile has a
+    # "plugins" entry pointing back at <HERMES_HOME>/plugins.  This is what
+    # lets a freshly-created profile pick up dashboard plugins (like
+    # memory-manager) without re-running the installer.  Designed to be
+    # safe + cheap to call on every Hermes startup: it only creates the
+    # junction when it's missing, never overwrites a real directory, and
+    # exits silently when there are no profiles yet.
+    param([string]$HermesHome)
+
+    $sourcePlugins = Join-Path $HermesHome "plugins"
+    $profilesDir   = Join-Path $HermesHome "profiles"
+
+    if (-not (Test-Path $sourcePlugins)) {
+        # Backend not installed at all — nothing to link.
+        return
+    }
+    if (-not (Test-Path $profilesDir)) {
+        return
+    }
+
+    Get-ChildItem $profilesDir -Directory | ForEach-Object {
+        $pName = $_.Name
+        $tgt   = Join-Path $_.FullName "plugins"
+        if (Test-Path $tgt) {
+            $item = Get-Item $tgt -Force
+            if ($item.LinkType -eq "Junction" -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                # Already a junction (or symlink) — leave it alone.
+                return
+            }
+            # Real directory at that path — don't clobber.
+            return
+        }
+        try {
+            New-Item -Path $tgt -ItemType Junction -Target $sourcePlugins -Force | Out-Null
+            Write-Host "  [memory-manager] linked new profile: $pName" -ForegroundColor Green
+        } catch {
+            Write-Host "  [memory-manager] failed to link $pName : $_" -ForegroundColor Red
+        }
+    }
+}
+
 function Enable-Plugin {
     param([string]$HermesHome, [string]$PluginId)
     $enableScript = @"
@@ -124,12 +166,37 @@ function Uninstall-Plugin {
     param([string]$HermesHome, [string]$PluginId)
     $backendDir = Join-Path $HermesHome "plugins\$PluginId"
     $desktopDir = Join-Path $HermesHome "desktop-plugins\$PluginId"
+    $gatewayScript = Join-Path $HermesHome "gateway-service\Hermes_Gateway.cmd"
 
     Write-Host "Removing: $backendDir" -ForegroundColor Yellow
     if (Test-Path $backendDir) { Remove-Item -Recurse -Force $backendDir }
 
     Write-Host "Removing: $desktopDir" -ForegroundColor Yellow
     if (Test-Path $desktopDir) { Remove-Item -Recurse -Force $desktopDir }
+
+    # Strip our auto-link lines from the gateway startup script so we don't
+    # leave a dangling reference to a script we just deleted. We match the
+    # marker comment plus the powershell line that follows it.
+    if (Test-Path $gatewayScript) {
+        $marker = "[memory-manager] auto-link"
+        $lines  = Get-Content -LiteralPath $gatewayScript
+        $kept   = @()
+        $skip   = $false
+        foreach ($line in $lines) {
+            if ($skip) { $skip = $false; continue }
+            if ($line -match [regex]::Escape($marker)) {
+                # Drop this marker line and the very next line (our powershell call).
+                $skip = $true
+                continue
+            }
+            $kept += $line
+        }
+        # Trim trailing blank lines to keep the file tidy.
+        while ($kept.Count -gt 0 -and $kept[-1] -match '^\s*$') { $kept = $kept[0..($kept.Count - 2)] }
+        $kept += ""
+        [System.IO.File]::WriteAllLines($gatewayScript, $kept)
+        Write-Host "Stripped auto-link lines from: $gatewayScript" -ForegroundColor Yellow
+    }
 
     Disable-Plugin -HermesHome $HermesHome -PluginId $PluginId
 
@@ -194,26 +261,68 @@ switch ($Action.ToLower()) {
 
         Enable-Plugin -HermesHome $HermesHome -PluginId $PLUGIN_ID
 
-        # --- Link plugins directory to all profiles ----------------------------------
-        $sourcePlugins = Join-Path $HermesHome "plugins"
-        $profilesDir   = Join-Path $HermesHome "profiles"
-        if (Test-Path $profilesDir) {
-            Write-Host ""
-            Write-Host "Linking plugins to all profiles..." -ForegroundColor Cyan
-            Get-ChildItem $profilesDir -Directory | ForEach-Object {
-                $pName = $_.Name
-                $tgt   = Join-Path $_.FullName "plugins"
-                if (-not (Test-Path $tgt)) {
-                    try {
-                        New-Item -Path $tgt -ItemType Junction -Target $sourcePlugins -Force | Out-Null
-                        Write-Host "  [$pName] LINKED" -ForegroundColor Green
-                    } catch {
-                        Write-Host "  [$pName] FAILED: $_" -ForegroundColor Red
-                    }
-                } else {
-                    Write-Host "  [$pName] already exists, skipped" -ForegroundColor Yellow
+        # One-shot link pass right after install so every existing profile
+        # has plugins/ available immediately.
+        Write-Host ""
+        Write-Host "Linking plugins to all profiles..." -ForegroundColor Cyan
+        Ensure-ProfilePluginsLinks -HermesHome $HermesHome
+
+        # Wire ensure-links into the Hermes gateway startup script so any
+        # profile created later (e.g. via the desktop UI's "+ New profile"
+        # button) automatically picks up the memory-manager backend. The
+        # write is idempotent — we only add the line if it isn't already
+        # present, and a marker comment lets us recognise our own line.
+        #
+        # We also need a stable path the gateway script can call into, so
+        # we copy this installer (and its sibling install.sh) into
+        # <HERMES_HOME>/plugins/memory-manager/dashboard/ as "ensure.ps1"
+        # / "ensure.sh". That way the gateway always invokes the same path
+        # regardless of where the user originally ran the installer from.
+        $ensureScript = Join-Path $backendDir "ensure.ps1"
+        try {
+            if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "install.ps1"))) {
+                Copy-Item -LiteralPath (Join-Path $PSScriptRoot "install.ps1") -Destination $ensureScript -Force
+            } else {
+                $url = "$REPO_BASE/install.ps1"
+                $resp = Invoke-WebRequest -Uri $url -UseBasicParsing
+                $bytes = $resp.Content
+                if ($bytes -is [string]) {
+                    $enc = New-Object System.Text.UTF8Encoding $false
+                    $bytes = $enc.GetBytes($bytes)
                 }
+                [System.IO.File]::WriteAllBytes($ensureScript, $bytes)
             }
+        } catch {
+            Write-Host "  Warning: could not stage ensure.ps1 (auto-link on startup will not be wired): $_" -ForegroundColor Yellow
+        }
+        $gatewayScript = Join-Path $HermesHome "gateway-service\Hermes_Gateway.cmd"
+        $marker        = "[memory-manager] auto-link"
+        if ((Test-Path $gatewayScript) -and (Test-Path $ensureScript)) {
+            $existing = Get-Content -LiteralPath $gatewayScript -Raw -ErrorAction SilentlyContinue
+            if ($existing -and ($existing -notmatch [regex]::Escape($marker))) {
+                $appendLines = @(
+                    "",
+                    "REM $marker ensure newly-created profiles pick up the memory-manager backend",
+                    "powershell -NoProfile -ExecutionPolicy Bypass -File ""$ensureScript"" ensure-links >nul 2>&1"
+                )
+                Add-Content -LiteralPath $gatewayScript -Value $appendLines -Encoding ASCII
+                Write-Host ""
+                Write-Host "Wired auto-link into Hermes gateway startup:" -ForegroundColor Cyan
+                Write-Host "  $gatewayScript"
+                Write-Host "  ensure script: $ensureScript"
+            } elseif ($existing -and ($existing -match [regex]::Escape($marker))) {
+                Write-Host ""
+                Write-Host "Hermes gateway startup already wired for auto-link (skipped)." -ForegroundColor Yellow
+            } else {
+                Write-Host ""
+                Write-Host "Could not read gateway script to wire auto-link (skipped):" -ForegroundColor Yellow
+                Write-Host "  $gatewayScript"
+            }
+        } else {
+            Write-Host ""
+            Write-Host "Hermes gateway script not found, skipped auto-link wiring:" -ForegroundColor Yellow
+            Write-Host "  $gatewayScript"
+            Write-Host "  (Create a profile once in Hermes Desktop so the script is generated, then re-run this installer.)"
         }
 
         Write-Host ""
@@ -224,14 +333,25 @@ switch ($Action.ToLower()) {
         Write-Host "  2. Open the sidebar - you will see a 'Memory Manager' entry."
         Write-Host "  3. Or use the command palette (Ctrl+K) and search 'Open Memory Manager'."
         Write-Host ""
+        Write-Host "Auto-link new profiles:" -ForegroundColor Cyan
+        Write-Host "  This installer has been wired into Hermes gateway startup so any"
+        Write-Host "  profile you create later will automatically get the memory-manager"
+        Write-Host "  backend mounted (via a junction to <HERMES_HOME>/plugins)."
+        Write-Host ""
         Write-Host "To uninstall: powershell -ExecutionPolicy Bypass -File .\install.ps1 uninstall"
     }
     "uninstall" {
         Write-Host "Uninstalling $PLUGIN_ID..." -ForegroundColor Yellow
         Uninstall-Plugin -HermesHome $HermesHome -PluginId $PLUGIN_ID
     }
+    "ensure-links" {
+        # Idempotent: re-link any profile that's missing <profile>/plugins.
+        # Intended to be called from Hermes' startup script so freshly-created
+        # profiles pick up the memory-manager backend automatically.
+        Ensure-ProfilePluginsLinks -HermesHome $HermesHome
+    }
     default {
-        Write-Host "Usage: powershell -ExecutionPolicy Bypass -File .\install.ps1 [install|uninstall]" -ForegroundColor Red
+        Write-Host "Usage: powershell -ExecutionPolicy Bypass -File .\install.ps1 [install|uninstall|ensure-links]" -ForegroundColor Red
         exit 1
     }
 }

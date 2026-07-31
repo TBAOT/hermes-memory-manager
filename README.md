@@ -55,21 +55,9 @@ The installer will:
 1. Place backend files → `<HERMES_HOME>/plugins/memory-manager/dashboard/`
 2. Place desktop plugin → `<HERMES_HOME>/desktop-plugins/memory-manager/plugin.js`
 3. Enable the plugin in `config.yaml` (`hermes plugins enable memory-manager`)
-4. Prompt you to restart Hermes Desktop
-
-### Native install (Hermes 0.11+)
-
-On any platform with `hermes` CLI available:
-
-```bash
-bash hermes-install.sh install
-```
-
-This uses the project-local `plugin.yaml` manifest so Hermes can discover, install, and enable the plugin natively. Uninstall with:
-
-```bash
-bash hermes-install.sh uninstall
-```
+4. Link the backend into every existing profile (so memory-manager works no matter which profile is active)
+5. Wire an **auto-link hook** into the Hermes gateway startup script — so any profile you create later automatically gets the memory-manager backend mounted too. You don't need to re-run the installer when you add a new profile.
+6. Prompt you to restart Hermes Desktop
 
 ### Manual installation
 
@@ -111,10 +99,9 @@ hermes-memory-manager/
 │       └── plugin_api.py          # FastAPI router (GET/POST /content, GET /profile)
 ├── desktop/
 │   └── plugin.js                  # Desktop runtime plugin (route, sidebar, palette)
-├── scripts/
-│   └── link-plugins-api-to-profiles.ps1   # Multi-profile helper
-├── install.ps1                    # Windows installer
-├── install.sh                     # Unix installer
+├── install.ps1                    # Windows installer (+ ensure-links subcommand)
+├── install.sh                     # Unix installer (+ ensure-links subcommand)
+├── plugin.yaml                    # Native Hermes plugin manifest
 └── README.md
 ```
 
@@ -122,11 +109,17 @@ hermes-memory-manager/
 
 ## Multi-Profile Support
 
-Hermes uses **profiles** (separate config/memory directories for different contexts). The one-line installer automatically creates plugin links for **all** existing profiles — no extra steps needed.
+Hermes uses **profiles** (separate config/memory directories for different contexts). The one-line installer wires up two things:
 
-> **New profile created later?** Just re-run the one-line installer, or link manually:
-> - **Windows:** `powershell -ExecutionPolicy Bypass -File scripts\link-plugins-api-to-profiles.ps1`
-> - **Linux / macOS:** `ln -sfn ~/.hermes/plugins ~/.hermes/profiles/<name>/plugins`
+1. **One-shot link** — every existing profile under `<HERMES_HOME>/profiles/*` gets a `plugins` junction pointing at `<HERMES_HOME>/plugins`, so the memory-manager backend is visible immediately.
+2. **Auto-link on startup** — the installer appends an idempotent line to `<HERMES_HOME>/gateway-service/Hermes_Gateway.cmd` (Windows) that calls `install.ps1 ensure-links` (or `install.sh ensure-links` on Linux/macOS) every time the gateway starts. Whenever you create a brand-new profile in the Hermes UI, the next gateway restart automatically creates the missing junction for it. No manual re-install needed.
+
+The auto-link logic is safe and cheap to run repeatedly: it only creates the junction when it's missing, never overwrites a real directory, and exits silently when there are no profiles yet.
+
+If you ever need to run the auto-link check manually:
+
+- **Windows:** `powershell -ExecutionPolicy Bypass -File <HERMES_HOME>\plugins\memory-manager\dashboard\ensure.ps1 ensure-links`
+- **Linux / macOS:** `bash <HERMES_HOME>/plugins/memory-manager/dashboard/ensure.sh ensure-links`
 
 ---
 
@@ -144,12 +137,24 @@ All routes are profile-aware — `get_hermes_home()` resolves to the active prof
 
 ## Uninstall
 
-```bash
-hermes plugins disable memory-manager
-rm -rf ~/.hermes/plugins/memory-manager
-rm -rf ~/.hermes/desktop-plugins/memory-manager
-hermes gateway restart
+**Windows:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 uninstall
 ```
+
+**Linux / macOS:**
+
+```bash
+bash install.sh uninstall
+```
+
+Both variants:
+
+- remove the backend at `<HERMES_HOME>/plugins/memory-manager/`
+- remove the desktop plugin at `<HERMES_HOME>/desktop-plugins/memory-manager/`
+- strip the auto-link lines that the installer added to `Hermes_Gateway.cmd`
+- remove `memory-manager` from `plugins.enabled` in `config.yaml`
 
 ---
 

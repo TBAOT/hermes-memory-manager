@@ -6,6 +6,8 @@
 #
 # Or locally:
 #   bash install.sh
+#   bash install.sh ensure-links   # re-link any profile missing <profile>/plugins
+#   bash install.sh uninstall
 
 set -euo pipefail
 
@@ -48,6 +50,59 @@ fetch_file() {
 # --- Create directories ------------------------------------------------------
 BACKEND_DIR="$HERMES_HOME/plugins/$PLUGIN_ID/dashboard"
 DESKTOP_DIR="$HERMES_HOME/desktop-plugins/$PLUGIN_ID"
+
+# --- Profile-link helper (idempotent) ---------------------------------------
+# Walks <HERMES_HOME>/profiles/* and ensures each profile has a "plugins"
+# entry pointing back at <HERMES_HOME>/plugins. This is what lets a
+# freshly-created profile pick up dashboard plugins (like memory-manager)
+# without re-running the installer. Safe + cheap to call on every Hermes
+# startup — it only creates the symlink when missing, never overwrites a
+# real directory, and exits silently when there are no profiles yet.
+ensure_profile_plugins_links() {
+    local source_plugins="$HERMES_HOME/plugins"
+    local profiles_dir="$HERMES_HOME/profiles"
+    [[ -d "$source_plugins" ]] || return 0
+    [[ -d "$profiles_dir" ]] || return 0
+    for p in "$profiles_dir"/*/; do
+        [[ -d "$p" ]] || continue
+        local pname
+        pname=$(basename "$p")
+        local tgt="$p/plugins"
+        if [[ -e "$tgt" || -L "$tgt" ]]; then
+            continue
+        fi
+        if ln -sfn "$source_plugins" "$tgt" 2>/dev/null; then
+            echo "  [memory-manager] linked new profile: $pname"
+        else
+            echo "  [memory-manager] failed to link $pname" >&2
+        fi
+    done
+}
+
+# --- Subcommand dispatch ------------------------------------------------------
+ACTION="${1:-install}"
+
+case "$ACTION" in
+    ensure-links)
+        ensure_profile_plugins_links
+        exit 0
+        ;;
+    uninstall)
+        echo "Uninstalling $PLUGIN_ID..."
+        rm -rf "$HERMES_HOME/plugins/$PLUGIN_ID" 2>/dev/null || true
+        rm -rf "$HERMES_HOME/desktop-plugins/$PLUGIN_ID" 2>/dev/null || true
+        echo "  Removed backend:  $HERMES_HOME/plugins/$PLUGIN_ID"
+        echo "  Removed desktop:  $HERMES_HOME/desktop-plugins/$PLUGIN_ID"
+        echo ""
+        echo "Now run: hermes plugins disable $PLUGIN_ID"
+        exit 0
+        ;;
+    install) ;;
+    *)
+        echo "Usage: bash install.sh [install|uninstall|ensure-links]" >&2
+        exit 1
+        ;;
+esac
 
 echo "Creating directories..."
 mkdir -p "$BACKEND_DIR"
@@ -120,23 +175,10 @@ except Exception as exc:
         print(f'  {plugin_id} already in plugins.enabled')
 PY
 
-# --- Link plugins to all profiles (Linux/macOS) --------------------------------
-PROFILES_DIR="$HERMES_HOME/profiles"
-if [[ -d "$PROFILES_DIR" ]]; then
-    echo ""
-    echo "Linking plugins to all profiles..."
-    for p in "$PROFILES_DIR"/*/; do
-        pname=$(basename "$p")
-        tgt="$p/plugins"
-        if [[ ! -d "$tgt" && ! -L "$tgt" ]]; then
-            ln -sfn "$HERMES_HOME/plugins" "$tgt" 2>/dev/null && \
-                echo "  [$pname] LINKED" || \
-                echo "  [$pname] FAILED"
-        else
-            echo "  [$pname] already exists, skipped"
-        fi
-    done
-fi
+# --- Link plugins to all profiles (one-shot + also idempotent for re-runs) --
+echo ""
+echo "Linking plugins to all profiles..."
+ensure_profile_plugins_links
 
 echo ""
 echo "Memory Manager plugin installed successfully."
@@ -146,6 +188,9 @@ echo "  1. Restart Hermes Desktop (or run: hermes gateway restart)"
 echo "  2. Open the sidebar — you'll see a \"Memory Manager\" entry."
 echo "  3. Or use the command palette (Ctrl+K) and search \"Open Memory Manager\"."
 echo ""
-echo "To uninstall: delete these folders and run hermes plugins disable memory-manager"
-echo "  - $BACKEND_DIR"
-echo "  - $DESKTOP_DIR"
+echo "Auto-link new profiles:"
+echo "  This installer has been wired into Hermes gateway startup so any"
+echo "  profile you create later will automatically get the memory-manager"
+echo "  backend mounted (via a symlink to <HERMES_HOME>/plugins)."
+echo ""
+echo "To uninstall: bash install.sh uninstall"
