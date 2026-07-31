@@ -111,10 +111,10 @@ hermes-memory-manager/
 
 Hermes uses **profiles** (separate config/memory directories for different contexts). The one-line installer wires up two things:
 
-1. **One-shot link** — every existing profile under `<HERMES_HOME>/profiles/*` gets a `plugins` junction pointing at `<HERMES_HOME>/plugins`, so the memory-manager backend is visible immediately.
-2. **Auto-link on startup** — the installer appends an idempotent line to `<HERMES_HOME>/gateway-service/Hermes_Gateway.cmd` (Windows) that calls `install.ps1 ensure-links` (or `install.sh ensure-links` on Linux/macOS) every time the gateway starts. Whenever you create a brand-new profile in the Hermes UI, the next gateway restart automatically creates the missing junction for it. No manual re-install needed.
+1. **One-shot link** — every existing profile under `<HERMES_HOME>/profiles/*` gets **two** junctions: a `plugins` junction pointing at `<HERMES_HOME>/plugins` (so the memory-manager backend API is mounted) and a `desktop-plugins` junction pointing at `<HERMES_HOME>/desktop-plugins` (so the desktop sidebar entry loads). Both are required — the desktop runtime plugin is scanned from the **profile-scoped** `<profile>/desktop-plugins` path.
+2. **Auto-link on startup** — the installer appends an idempotent line to `<HERMES_HOME>/gateway-service/Hermes_Gateway.cmd` (Windows) that calls `install.ps1 ensure-links` (or `install.sh ensure-links` on Linux/macOS) every time the gateway starts. Whenever you create a brand-new profile in the Hermes UI, the next gateway restart automatically creates both missing junctions for it. No manual re-install needed.
 
-The auto-link logic is safe and cheap to run repeatedly: it only creates the junction when it's missing, never overwrites a real directory, and exits silently when there are no profiles yet.
+The auto-link logic is safe and cheap to run repeatedly: it only creates a junction when it's missing, never overwrites a real directory, and exits silently when there are no profiles yet.
 
 If you ever need to run the auto-link check manually:
 

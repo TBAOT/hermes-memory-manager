@@ -64,43 +64,47 @@ function Install-PluginFile {
 
 # --- helpers to enable/disable the plugin in config.yaml -------------------
 function Ensure-ProfilePluginsLinks {
-    # Walks <HERMES_HOME>/profiles/* and makes sure each profile has a
-    # "plugins" entry pointing back at <HERMES_HOME>/plugins.  This is what
+    # Walks <HERMES_HOME>/profiles/* and makes sure each profile has BOTH a
+    # "plugins" and a "desktop-plugins" entry pointing back at the global
+    # <HERMES_HOME>/plugins and <HERMES_HOME>/desktop-plugins. This is what
     # lets a freshly-created profile pick up dashboard plugins (like
-    # memory-manager) without re-running the installer.  Designed to be
-    # safe + cheap to call on every Hermes startup: it only creates the
-    # junction when it's missing, never overwrites a real directory, and
-    # exits silently when there are no profiles yet.
+    # memory-manager) AND the desktop runtime plugin without re-running the
+    # installer. Designed to be safe + cheap to call on every Hermes
+    # startup: it only creates the junction when it's missing, never
+    # overwrites a real directory, and exits silently when there are no
+    # profiles yet.
     param([string]$HermesHome)
 
-    $sourcePlugins = Join-Path $HermesHome "plugins"
-    $profilesDir   = Join-Path $HermesHome "profiles"
+    $profilesDir = Join-Path $HermesHome "profiles"
 
-    if (-not (Test-Path $sourcePlugins)) {
-        # Backend not installed at all — nothing to link.
-        return
-    }
     if (-not (Test-Path $profilesDir)) {
         return
     }
 
     Get-ChildItem $profilesDir -Directory | ForEach-Object {
         $pName = $_.Name
-        $tgt   = Join-Path $_.FullName "plugins"
-        if (Test-Path $tgt) {
-            $item = Get-Item $tgt -Force
-            if ($item.LinkType -eq "Junction" -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                # Already a junction (or symlink) — leave it alone.
-                return
+        foreach ($dirName in @("plugins", "desktop-plugins")) {
+            $source = Join-Path $HermesHome $dirName
+            if (-not (Test-Path $source)) {
+                # That part not installed at all — nothing to link.
+                continue
             }
-            # Real directory at that path — don't clobber.
-            return
-        }
-        try {
-            New-Item -Path $tgt -ItemType Junction -Target $sourcePlugins -Force | Out-Null
-            Write-Host "  [memory-manager] linked new profile: $pName" -ForegroundColor Green
-        } catch {
-            Write-Host "  [memory-manager] failed to link $pName : $_" -ForegroundColor Red
+            $tgt = Join-Path $_.FullName $dirName
+            if (Test-Path $tgt) {
+                $item = Get-Item $tgt -Force
+                if ($item.LinkType -eq "Junction" -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                    # Already a junction (or symlink) — leave it alone.
+                    continue
+                }
+                # Real directory at that path — don't clobber.
+                continue
+            }
+            try {
+                New-Item -Path $tgt -ItemType Junction -Target $source -Force | Out-Null
+                Write-Host "  [memory-manager] linked new profile $pName ($dirName)" -ForegroundColor Green
+            } catch {
+                Write-Host "  [memory-manager] failed to link $pName ($dirName) : $_" -ForegroundColor Red
+            }
         }
     }
 }
@@ -362,7 +366,8 @@ switch ($Action.ToLower()) {
         Write-Host "Auto-link new profiles:" -ForegroundColor Cyan
         Write-Host "  This installer has been wired into Hermes gateway startup so any"
         Write-Host "  profile you create later will automatically get the memory-manager"
-        Write-Host "  backend mounted (via a junction to <HERMES_HOME>/plugins)."
+        Write-Host "  backend AND desktop plugin (via junctions to <HERMES_HOME>/plugins"
+        Write-Host "  and <HERMES_HOME>/desktop-plugins)."
         Write-Host ""
         Write-Host "To uninstall: powershell -ExecutionPolicy Bypass -File .\install.ps1 uninstall"
     }
@@ -371,9 +376,10 @@ switch ($Action.ToLower()) {
         Uninstall-Plugin -HermesHome $HermesHome -PluginId $PLUGIN_ID
     }
     "ensure-links" {
-        # Idempotent: re-link any profile that's missing <profile>/plugins.
-        # Intended to be called from Hermes' startup script so freshly-created
-        # profiles pick up the memory-manager backend automatically.
+        # Idempotent: re-link any profile that's missing <profile>/plugins or
+        # <profile>/desktop-plugins. Intended to be called from Hermes'
+        # startup script so freshly-created profiles pick up the
+        # memory-manager backend AND desktop plugin automatically.
         Ensure-ProfilePluginsLinks -HermesHome $HermesHome
     }
     default {

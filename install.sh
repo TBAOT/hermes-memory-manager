@@ -6,7 +6,7 @@
 #
 # Or locally:
 #   bash install.sh
-#   bash install.sh ensure-links   # re-link any profile missing <profile>/plugins
+#   bash install.sh ensure-links   # re-link profiles missing plugins/desktop-plugins
 #   bash install.sh uninstall
 
 set -euo pipefail
@@ -52,30 +52,34 @@ BACKEND_DIR="$HERMES_HOME/plugins/$PLUGIN_ID/dashboard"
 DESKTOP_DIR="$HERMES_HOME/desktop-plugins/$PLUGIN_ID"
 
 # --- Profile-link helper (idempotent) ---------------------------------------
-# Walks <HERMES_HOME>/profiles/* and ensures each profile has a "plugins"
-# entry pointing back at <HERMES_HOME>/plugins. This is what lets a
-# freshly-created profile pick up dashboard plugins (like memory-manager)
-# without re-running the installer. Safe + cheap to call on every Hermes
-# startup — it only creates the symlink when missing, never overwrites a
-# real directory, and exits silently when there are no profiles yet.
+# Walks <HERMES_HOME>/profiles/* and ensures each profile has both a
+# "plugins" and a "desktop-plugins" entry pointing back at the global
+# <HERMES_HOME>/plugins and <HERMES_HOME>/desktop-plugins. This is what lets
+# a freshly-created profile pick up dashboard plugins (like memory-manager)
+# AND the desktop runtime plugin without re-running the installer. Safe +
+# cheap to call on every Hermes startup — it only creates the symlink when
+# missing, never overwrites a real directory, and exits silently when there
+# are no profiles yet.
 ensure_profile_plugins_links() {
-    local source_plugins="$HERMES_HOME/plugins"
     local profiles_dir="$HERMES_HOME/profiles"
-    [[ -d "$source_plugins" ]] || return 0
     [[ -d "$profiles_dir" ]] || return 0
     for p in "$profiles_dir"/*/; do
         [[ -d "$p" ]] || continue
         local pname
         pname=$(basename "$p")
-        local tgt="$p/plugins"
-        if [[ -e "$tgt" || -L "$tgt" ]]; then
-            continue
-        fi
-        if ln -sfn "$source_plugins" "$tgt" 2>/dev/null; then
-            echo "  [memory-manager] linked new profile: $pname"
-        else
-            echo "  [memory-manager] failed to link $pname" >&2
-        fi
+        for dir_name in plugins desktop-plugins; do
+            local source="$HERMES_HOME/$dir_name"
+            [[ -d "$source" ]] || continue
+            local tgt="$p/$dir_name"
+            if [[ -e "$tgt" || -L "$tgt" ]]; then
+                continue
+            fi
+            if ln -sfn "$source" "$tgt" 2>/dev/null; then
+                echo "  [memory-manager] linked new profile: $pname ($dir_name)"
+            else
+                echo "  [memory-manager] failed to link $pname ($dir_name)" >&2
+            fi
+        done
     done
 }
 
@@ -191,6 +195,7 @@ echo ""
 echo "Auto-link new profiles:"
 echo "  This installer has been wired into Hermes gateway startup so any"
 echo "  profile you create later will automatically get the memory-manager"
-echo "  backend mounted (via a symlink to <HERMES_HOME>/plugins)."
+echo "  backend AND desktop plugin (via symlinks to <HERMES_HOME>/plugins"
+echo "  and <HERMES_HOME>/desktop-plugins)."
 echo ""
 echo "To uninstall: bash install.sh uninstall"
