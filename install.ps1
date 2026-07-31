@@ -300,12 +300,38 @@ switch ($Action.ToLower()) {
         if ((Test-Path $gatewayScript) -and (Test-Path $ensureScript)) {
             $existing = Get-Content -LiteralPath $gatewayScript -Raw -ErrorAction SilentlyContinue
             if ($existing -and ($existing -notmatch [regex]::Escape($marker))) {
-                $appendLines = @(
-                    "",
+                # Insert the auto-link hook before the gateway run command so it
+                # executes on every startup BEFORE the gateway process starts.
+                # The gateway line is the python(w).exe ... gateway run call.
+                $lines = @(Get-Content -LiteralPath $gatewayScript)
+                $insertLines = @(
                     "REM $marker ensure newly-created profiles pick up the memory-manager backend",
-                    "powershell -NoProfile -ExecutionPolicy Bypass -File ""$ensureScript"" ensure-links >nul 2>&1"
+                    "powershell -NoProfile -ExecutionPolicy Bypass -File ""$ensureScript"" ensure-links >nul 2>&1",
+                    ""
                 )
-                Add-Content -LiteralPath $gatewayScript -Value $appendLines -Encoding ASCII
+                $newLines = @()
+                $inserted = $false
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                    if (-not $inserted -and ($lines[$i] -match 'pythonw?\.exe.*gateway\s+run')) {
+                        $newLines = $lines[0..($i - 1)] + $insertLines + $lines[$i..($lines.Count - 1)]
+                        $inserted = $true
+                        break
+                    }
+                }
+                if (-not $inserted) {
+                    # No gateway-run line found — fall back to inserting before exit /b.
+                    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+                        if (-not $inserted -and ($lines[$i] -match '^exit\s+/b')) {
+                            $newLines = $lines[0..($i - 1)] + $insertLines + $lines[$i..($lines.Count - 1)]
+                            $inserted = $true
+                            break
+                        }
+                    }
+                }
+                if (-not $inserted) {
+                    $newLines = $lines + $insertLines
+                }
+                [System.IO.File]::WriteAllLines($gatewayScript, $newLines)
                 Write-Host ""
                 Write-Host "Wired auto-link into Hermes gateway startup:" -ForegroundColor Cyan
                 Write-Host "  $gatewayScript"
