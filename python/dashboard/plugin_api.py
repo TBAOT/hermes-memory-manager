@@ -17,6 +17,7 @@ import shutil
 from pathlib import Path
 from typing import Dict
 
+import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -34,8 +35,9 @@ MEMORY_FILES: Dict[str, str] = {
     "user": "USER.md",
 }
 
-# Default size limit: 1 MiB total for both files.
-DEFAULT_MAX_SIZE_BYTES = 1_048_576
+# Default per-file character budgets, matching Hermes' config.yaml defaults.
+DEFAULT_MEMORY_CHAR_LIMIT = 2200
+DEFAULT_USER_CHAR_LIMIT = 1375
 
 
 class MemoryContent(BaseModel):
@@ -48,7 +50,8 @@ class MemoryContent(BaseModel):
 class MemorySettings(BaseModel):
     """Request / response body for plugin settings."""
 
-    max_size_bytes: int = DEFAULT_MAX_SIZE_BYTES
+    memory_char_limit: int = DEFAULT_MEMORY_CHAR_LIMIT
+    user_char_limit: int = DEFAULT_USER_CHAR_LIMIT
 
 
 def _memory_dir() -> Path:
@@ -61,8 +64,42 @@ def _settings_path() -> Path:
     return _memory_dir() / ".memory-manager-settings.json"
 
 
+def _config_path() -> Path:
+    """Return the path to Hermes' config.yaml."""
+    return get_hermes_home() / "config.yaml"
+
+
+def _load_config_yaml() -> Dict:
+    """Load Hermes config.yaml as a dict, returning empty dict on error."""
+    path = _config_path()
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
 def _load_settings() -> MemorySettings:
-    """Load persisted settings or return defaults."""
+    """Load memory budget settings from Hermes config.yaml.
+
+    Falls back to the plugin-local JSON file for backwards compatibility,
+    then to the Hermes defaults.
+    """
+    cfg = _load_config_yaml()
+    memory_cfg = cfg.get("memory", {})
+
+    if isinstance(memory_cfg, dict):
+        memory_limit = memory_cfg.get("memory_char_limit", DEFAULT_MEMORY_CHAR_LIMIT)
+        user_limit = memory_cfg.get("user_char_limit", DEFAULT_USER_CHAR_LIMIT)
+        if isinstance(memory_limit, int) and isinstance(user_limit, int):
+            return MemorySettings(
+                memory_char_limit=memory_limit,
+                user_char_limit=user_limit,
+            )
+
+    # Backwards compatibility: read from the old local settings file.
     path = _settings_path()
     if path.exists():
         try:
@@ -70,11 +107,12 @@ def _load_settings() -> MemorySettings:
             return MemorySettings(**raw)
         except (OSError, json.JSONDecodeError, ValueError):
             pass
+
     return MemorySettings()
 
 
 def _save_settings(settings: MemorySettings) -> None:
-    """Persist settings to disk."""
+    """Persist settings to the plugin-local JSON file."""
     path = _settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -152,21 +190,13 @@ async def save_memory_content(body: MemoryContent) -> Dict[str, object]:
     next to the original.
     """
     mem_dir = _memory_dir()
-    settings = _load_settings()
     written: list[str] = []
-    total_after = 0
     for key, fname in MEMORY_FILES.items():
         value = getattr(body, key)
         if value is None:
-            total_after += _file_size(mem_dir / fname)
             continue
         _write_file(mem_dir / fname, value)
         written.append(fname)
-        total_after += len(value.encode("utf-8"))
-
-    if total_after > settings.max_size_bytes:
-        # Warn but don't block — the UI will show over-limit state.
-        pass
 
     return {"status": "success", "written": written}
 
@@ -198,26 +228,43 @@ async def get_profile_info() -> Dict[str, object]:
 
 @router.get("/stats")
 async def get_memory_stats() -> Dict[str, object]:
-    """Return file sizes and usage statistics."""
+    """Return per-file character usage and limit statistics."""
     mem_dir = _memory_dir()
     settings = _load_settings()
+
+    limits = {
+        "memory": settings.memory_char_limit,
+        "user": settings.user_char_limit,
+    }
+
     sizes = {}
-    total = 0
+    total_chars = 0
+    total_limit = 0
     for key, fname in MEMORY_FILES.items():
-        size = _file_size(mem_dir / fname)
+        text = _read_file(mem_dir / fname)
+        chars = len(text)
+        limit = limits.get(key, 0)
         sizes[key] = {
-            "bytes": size,
-            "formatted": _format_size(size),
+            "bytes": _file_size(mem_dir / fname),
+            "chars": chars,
+            "limit": limit,
+            "formatted": f"{chars} 字符",
+            "limit_formatted": f"{limit} 字符",
+            "usage_percent": round(chars / limit * 100, 1) if limit else 0,
         }
-        total += size
+        total_chars += chars
+        total_limit += limit
 
     return {
         "sizes": sizes,
-        "total_bytes": total,
-        "total_formatted": _format_size(total),
-        "max_size_bytes": settings.max_size_bytes,
-        "max_size_formatted": _format_size(settings.max_size_bytes),
-        "usage_percent": round(total / settings.max_size_bytes * 100, 1) if settings.max_size_bytes else 0,
+        "total_chars": total_chars,
+        "total_limit": total_limit,
+        "total_formatted": f"{total_chars} 字符",
+        "max_size_formatted": f"{total_limit} 字符",
+        "memory_char_limit": settings.memory_char_limit,
+        "user_char_limit": settings.user_char_limit,
+        # Kept for backwards-compatible clients; reflects total char usage.
+        "usage_percent": round(total_chars / total_limit * 100, 1) if total_limit else 0,
     }
 
 

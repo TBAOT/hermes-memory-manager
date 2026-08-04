@@ -265,12 +265,12 @@ function MemoryManagerPanel() {
             })
           }),
 
-          // Footer — size stats + file info
+          // Footer — per-file character budget + file info
           jsxs('div', {
             className: 'flex flex-col gap-1.5',
             children: [
-              // Size progress bar
-              stats && jsxs('div', {
+              // Per-file progress bar for the active tab
+              stats && stats.sizes?.[activeTab] && jsxs('div', {
                 className: 'flex items-center gap-2',
                 children: [
                   jsx('div', {
@@ -278,21 +278,21 @@ function MemoryManagerPanel() {
                     children: jsx('div', {
                       className: cn(
                         'h-full rounded-full transition-all',
-                        stats.usage_percent > 100 ? 'bg-destructive' :
-                        stats.usage_percent > 80 ? 'bg-amber-500' : 'bg-primary'
+                        stats.sizes[activeTab].usage_percent >= 90 ? 'bg-destructive' :
+                        stats.sizes[activeTab].usage_percent >= 70 ? 'bg-amber-500' : 'bg-primary'
                       ),
-                      style: { width: `${Math.min(stats.usage_percent, 100)}%` }
+                      style: { width: `${Math.min(stats.sizes[activeTab].usage_percent, 100)}%` }
                     })
                   }),
                   jsxs('span', {
                     className: cn(
                       'text-[11px] tabular-nums shrink-0',
-                      stats.usage_percent > 100 ? 'text-destructive font-medium' :
-                      stats.usage_percent > 80 ? 'text-amber-500' : 'text-muted-foreground'
+                      stats.sizes[activeTab].usage_percent >= 90 ? 'text-destructive font-medium' :
+                      stats.sizes[activeTab].usage_percent >= 70 ? 'text-amber-500' : 'text-muted-foreground'
                     ),
                     children: [
-                      `${stats.total_formatted} / ${stats.max_size_formatted}`,
-                      ` (${stats.usage_percent}%)`
+                      `${stats.sizes[activeTab].formatted} / ${stats.sizes[activeTab].limit_formatted}`,
+                      ` (${stats.sizes[activeTab].usage_percent}%)`
                     ]
                   })
                 ]
@@ -305,10 +305,7 @@ function MemoryManagerPanel() {
                   jsxs('span', {
                     children: [
                       '文件: ',
-                      TABS.find(t => t.key === activeTab)?.file,
-                      stats?.sizes?.[activeTab]
-                        ? ` (${stats.sizes[activeTab].formatted})`
-                        : null
+                      TABS.find(t => t.key === activeTab)?.file
                     ]
                   }),
                   hasDirty ? jsx('span', { className: 'text-amber-500', children: '有未保存的更改' }) : jsx('span', { children: '已保存' })
